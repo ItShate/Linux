@@ -1,0 +1,97 @@
+1)	首先在所有设备创建hph666用户并提权
+[root@NFS ~]# useradd hph666
+[root@NFS ~]# echo 123456|passwd --stdin hph666
+ 
+[root@Admin ~]# echo "hph666 ALL=  NOPASSWD: ALL">>/etc/sudoers
+[root@Nginx_Web_01 ~]# visudo -c 
+ 
+2)	不同用户下脚本的编辑（此部分可以忽略）
+在hh1用户下创建脚本
+ 
+ 
+使用root用户将hh1用户创建的脚本拷贝到用户hph666的家目录下+
+[root@Admin ~]# cp /home/hh1/shengcheng_fenfa_sshkey.sh /home/hph666/
+ 
+使用root用户修改hph666用户家目录下脚本的用户和用户组
+ 
+3)	脚本架构：
+上述步骤可直接忽略，直接在用户家目录下创建脚本（第6步）：
+ 
+4)	管理机通过非交互式expect脚本分发密钥
+[hph666@Admin ~]$ vim fen_sshkey_1.exp
+#!/usr/bin/expect
+#判断参数个数，如果不满足2个参数就提示
+if { $argc != 2 } {
+ send_user "usage: expect fen_sshkey_1.exp file host\n"
+ exit
+}
+
+#define var
+#set定义变量file
+set file [lindex $argv 0]
+#set定义变量host
+set host [lindex $argv 1]
+#set定义变量password
+set password "123456"
+
+#spawn scp /etc/hosts root@10.0.0.31:/etc/hosts
+#spawn scp -P65535 $file hph@$hosts:$dir
+#spawn定义要执行的命令
+spawn ssh-copy-id -i $file "-p 65535 hh1@$host"
+expect {
+        #提示“yes/no”，就发送yes并回车继续
+        "yes/no"        {send "yes\r";exp_continue}
+        #提示”***password“，就发送定义password变量并回车
+        "*password"     {send "$password\r"}
+}
+expect eof
+
+exit -onexit {
+ send_user "hph say goodbye to you!\n"
+}
+
+#script usage
+#example
+#expect fenfa_sshkey.exp file host dir
+#expect fenfa_sshkey.exp ~/hosts 10.0.0.41:~
+注意：注释不能放在行末
+ 
+5)	创建HTTP安装脚本
+[hph666@Admin ~]$ vim scripts/install.sh 
+yum install httpd -y
+ 
+6)	创建生成、分发密钥以及安装HTTP服务的脚本
+[hph666@Admin ~]$ vim shengcheng_fenfa_sshkey.sh 
+
+#!/bin/sh
+#载入系统函数库
+. /etc/init.d/functions
+#创建公钥
+ssh-keygen -t dsa -P '' -f ~/.ssh/id_dsa >/dev/null 2>&1
+if [ $? -eq 0 ];then
+    action "创建密钥：" /bin/true
+else
+    action "创建密钥：" /bin/false
+fi
+#分发密钥
+for ip in 8 31 41
+  do
+    expect fen_sshkey_1.exp ~/.ssh/id_dsa.pub 172.16.1.$ip >/dev/null 2>&1
+    if [ $? -eq 0 ];then
+        action "172.16.1.$ip" /bin/true
+    else
+        action "172.16.1.$ip" /bin/false
+    fi
+done
+#远程安装HTTP服务
+#sudo提权
+for i in 8 31 41
+  do
+    ssh -t -p 65535 hh1@172.16.1.$i sudo yum install httpd -y
+done
+ 
+7)	执行shengcheng_fenfa_sshkey.sh脚本
+ 
+8)	在服务器上查看：
+ 
+  
